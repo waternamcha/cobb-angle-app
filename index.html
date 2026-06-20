@@ -1259,33 +1259,41 @@ async function _runAutoDetect(){
       const cents=[];
       for(let i=0;i<17;i++) cents.push({x:out[i*2]*W, y:out[i*2+1]*H});
 
-      // Spine tangent at vertebra i — always downward (spine goes top→bottom)
+      // ── Smooth the centroid x-positions with a running average to reduce noise
+      const smoothX=cents.map((_,i)=>{
+        const lo=Math.max(0,i-2), hi=Math.min(16,i+2);
+        let s=0; for(let k=lo;k<=hi;k++) s+=cents[k].x;
+        return s/(hi-lo+1);
+      });
+      const smoothed=cents.map((c,i)=>({x:smoothX[i], y:c.y}));
+
+      // Spine tangent at vertebra i using ±3 window on smoothed positions
+      // Wide window reduces noise dramatically vs ±1 window
       function spineTangent(i){
-        const p0=cents[Math.max(0,i-1)], p1=cents[Math.min(16,i+1)];
-        let dx=p1.x-p0.x, dy=p1.y-p0.y;
-        if(dy<0){dx=-dx;dy=-dy;}  // ensure downward
+        const lo=Math.max(0,i-3), hi=Math.min(16,i+3);
+        let dx=smoothed[hi].x-smoothed[lo].x, dy=smoothed[hi].y-smoothed[lo].y;
+        if(dy<0){dx=-dx;dy=-dy;}
         const len=Math.hypot(dx,dy)||1;
         return {dx:dx/len, dy:dy/len};
       }
 
       // Endplate direction = perpendicular to spine tangent, rightward-normalised
-      // The vertebral endplate is horizontal when spine is vertical,
-      // and tilts as the spine curves — always 90° to the spine direction.
       function endplateDir(i){
         const t=spineTangent(i);
-        let ex=-t.dy, ey=t.dx;  // rotate 90° CCW
-        if(ex<0){ex=-ex;ey=-ey;}  // rightward
+        let ex=-t.dy, ey=t.dx;
+        if(ex<0){ex=-ex;ey=-ey;}
         return {dx:ex, dy:ey};
       }
 
-      // Find UEV/LEV: pair with maximum angle between their endplates
-      // Constrain: UEV in top 11 vertebrae, LEV in bottom 11, at least 3 apart
       const ll=W*0.15;
-      let bestAngle=0, uev=0, lev=16;
-      for(let i=0;i<=10;i++) for(let j=Math.max(i+3,6);j<17;j++){
+
+      // Find UEV/LEV: pair with maximum angle between their endplates
+      // Skip top 2 and bottom 2 vertebrae (often noisy / outside typical scoliosis range)
+      // UEV: vertebrae 2–10, LEV: vertebrae 8–15, minimum 4 apart
+      let bestAngle=0, uev=3, lev=13;
+      for(let i=2;i<=10;i++) for(let j=Math.max(i+4,8);j<=15;j++){
         const ei=endplateDir(i), ej=endplateDir(j);
-        const cos=ei.dx*ej.dx+ei.dy*ej.dy; // already unit vectors
-        const ang=Math.acos(Math.max(-1,Math.min(1,cos)))*180/Math.PI;
+        const ang=Math.acos(Math.max(-1,Math.min(1,ei.dx*ej.dx+ei.dy*ej.dy)))*180/Math.PI;
         if(ang>bestAngle){bestAngle=ang;uev=i;lev=j;}
       }
 
@@ -1295,36 +1303,38 @@ async function _runAutoDetect(){
         return [{x:c.x-ll*e.dx,y:c.y-ll*e.dy},{x:c.x+ll*e.dx,y:c.y+ll*e.dy}];
       }
 
-      // Curve 1
-      S.upper=makeEndplateLine(uev);
-      S.lower=makeEndplateLine(lev);
-      S.apical={x:cents[Math.round((uev+lev)/2)].x, y:cents[Math.round((uev+lev)/2)].y};
-      S.cobbIdx=5;
+      // Only place lines if a meaningful curve is detected (>5°)
+      if(bestAngle>=5){
+        S.upper=makeEndplateLine(uev);
+        S.lower=makeEndplateLine(lev);
+        S.apical={x:cents[Math.round((uev+lev)/2)].x, y:cents[Math.round((uev+lev)/2)].y};
+        S.cobbIdx=5;
 
-      // Curve 2: search for best pair below the Curve 1 inflection point
-      // Split: upper zone = 0..lev, lower zone = uev..16, look for second curve
-      let bestAngle2=0, uev2=lev, lev2=16;
-      const splitAt=Math.round((uev+lev)/2); // approximate inflection
-      for(let i=Math.max(0,splitAt-2);i<=Math.min(13,splitAt+4);i++){
-        for(let j=Math.max(i+3,splitAt+1);j<17;j++){
-          const ei=endplateDir(i), ej=endplateDir(j);
-          const cos=ei.dx*ej.dx+ei.dy*ej.dy;
-          const ang=Math.acos(Math.max(-1,Math.min(1,cos)))*180/Math.PI;
-          if(ang>bestAngle2){bestAngle2=ang;uev2=i;lev2=j;}
+        // Curve 2: look for second curve below the main curve's apex
+        const apex=Math.round((uev+lev)/2);
+        let bestAngle2=0, uev2=-1, lev2=-1;
+        for(let i=Math.max(2,apex-1);i<=Math.min(13,apex+3);i++){
+          for(let j=Math.max(i+4,apex+2);j<=15;j++){
+            const ei=endplateDir(i), ej=endplateDir(j);
+            const ang=Math.acos(Math.max(-1,Math.min(1,ei.dx*ej.dx+ei.dy*ej.dy)))*180/Math.PI;
+            if(ang>bestAngle2){bestAngle2=ang;uev2=i;lev2=j;}
+          }
         }
-      }
-      if(bestAngle2>3 && uev2!==uev){ // only set curve 2 if meaningfully different
-        S.upper2=makeEndplateLine(uev2);
-        S.lower2=makeEndplateLine(lev2);
-        S.apical2={x:cents[Math.round((uev2+lev2)/2)].x, y:cents[Math.round((uev2+lev2)/2)].y};
-        S.cobbIdx2=5;
-        console.log(`Curve2 UEV=V${uev2+1} LEV=V${lev2+1} computed=${bestAngle2.toFixed(1)}°`);
+        if(bestAngle2>=5 && uev2!==uev && lev2!==lev){
+          S.upper2=makeEndplateLine(uev2);
+          S.lower2=makeEndplateLine(lev2);
+          S.apical2={x:cents[Math.round((uev2+lev2)/2)].x, y:cents[Math.round((uev2+lev2)/2)].y};
+          S.cobbIdx2=5;
+          console.log(`ML Curve2: UEV=V${uev2+1} LEV=V${lev2+1} angle=${bestAngle2.toFixed(1)}°`);
+        }
+      } else {
+        console.warn(`ML: best angle only ${bestAngle.toFixed(1)}° — spine appears straight. Manual placement recommended.`);
       }
 
       S._mlCents=cents;
-      console.log('ML centroids (px):', cents.map((c,i)=>`V${i+1}(${c.x.toFixed(0)},${c.y.toFixed(0)})`).join(' '));
-      console.log(`Curve1 UEV=V${uev+1} LEV=V${lev+1} computed=${bestAngle.toFixed(1)}°`);
-      return; // ML succeeded — skip heuristic fallback
+      console.log('ML centroids:', cents.map((c,i)=>`V${i+1}(${c.x.toFixed(0)},${c.y.toFixed(0)})`).join(' '));
+      console.log(`ML Curve1: UEV=V${uev+1} LEV=V${lev+1} angle=${bestAngle.toFixed(1)}°`);
+      return; // ML done — skip heuristic fallback
     } catch(err){
       console.warn('ML auto-detect unavailable, using heuristic fallback:',err.message);
       window._cobbModel=null; // reset so next call retries
