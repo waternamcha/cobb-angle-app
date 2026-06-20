@@ -855,17 +855,6 @@ function drawCobbOverlay(z){
   if(l2[0]) drawEndHandle(l2[0],COL.lower2,z); if(l2[1]) drawEndHandle(l2[1],COL.lower2,z);
   if(u2[0]&&u2[1]&&l2[0]&&l2[1]) drawCobbArc(S.upper2,S.lower2,'#f97316',z);
   if(S.apical2) drawApical(S.apical2,COL.apical2,'Apical₂',z);
-  // Debug: ML centroid dots
-  if(S._mlCents){
-    S._mlCents.forEach((c,i)=>{
-      const r=6/z;
-      oCtx.beginPath(); oCtx.arc(c.x,c.y,r,0,Math.PI*2);
-      oCtx.fillStyle='rgba(255,255,0,0.85)'; oCtx.fill();
-      oCtx.strokeStyle='#000'; oCtx.lineWidth=1/z; oCtx.stroke();
-      oCtx.fillStyle='#000'; oCtx.font=`${10/z}px sans-serif`;
-      oCtx.fillText(i+1, c.x+r+1/z, c.y+4/z);
-    });
-  }
 }
 
 // ─── Balance overlay ──────────────────────────────────────────────────
@@ -1310,23 +1299,7 @@ async function _runAutoDetect(){
         S.apical={x:cents[Math.round((uev+lev)/2)].x, y:cents[Math.round((uev+lev)/2)].y};
         S.cobbIdx=5;
 
-        // Curve 2: look for second curve below the main curve's apex
-        const apex=Math.round((uev+lev)/2);
-        let bestAngle2=0, uev2=-1, lev2=-1;
-        for(let i=Math.max(2,apex-1);i<=Math.min(13,apex+3);i++){
-          for(let j=Math.max(i+4,apex+2);j<=15;j++){
-            const ei=endplateDir(i), ej=endplateDir(j);
-            const ang=Math.acos(Math.max(-1,Math.min(1,ei.dx*ej.dx+ei.dy*ej.dy)))*180/Math.PI;
-            if(ang>bestAngle2){bestAngle2=ang;uev2=i;lev2=j;}
-          }
-        }
-        if(bestAngle2>=5 && uev2!==uev && lev2!==lev){
-          S.upper2=makeEndplateLine(uev2);
-          S.lower2=makeEndplateLine(lev2);
-          S.apical2={x:cents[Math.round((uev2+lev2)/2)].x, y:cents[Math.round((uev2+lev2)/2)].y};
-          S.cobbIdx2=5;
-          console.log(`ML Curve2: UEV=V${uev2+1} LEV=V${lev2+1} angle=${bestAngle2.toFixed(1)}°`);
-        }
+        // Curve 2 is placed manually by the user via "+ Curve 2" button
       } else {
         console.warn(`ML: best angle only ${bestAngle.toFixed(1)}° — spine appears straight. Manual placement recommended.`);
       }
