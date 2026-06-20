@@ -1,0 +1,8 @@
+{
+  "input_size": 512,
+  "n_vertebrae": 17,
+  "output_length": 34,
+  "output_format": "centroids",
+  "description": "17 vertebra centroids (cx,cy) normalised 0-1, top-to-bottom",
+  "normalised": true
+}
